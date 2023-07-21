@@ -1,0 +1,268 @@
+---
+title: "Sorghum RNAseq"
+author: "Sanjay Singh, PhD"
+date: "`r Sys.Date()`"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,  warning = FALSE, message = FALSE)
+```
+
+## The Analysis of Genetic Architecture of Iron and Zinc Biofortified Sorghum using Transcriptomics Panel
+
+Transcriptome data generated from *Sorghum bicolor* were analysed. The data were generated from three sorghum genotypes/lines at milk dough stage.
+  Elite parent (EP)-- CSV-20
+  Yellow endosperm parent (YEP)-- AKSV-265 
+  White endosperm parent (WEP)-- AKSV-438
+**The analysis was performed taking EP line as base/reference level.**
+
+```{r , message=FALSE, warning=FALSE}
+library(readxl)
+library(DESeq2)
+```
+
+```{r}
+count_data <- read_excel("C:/Users/IASRI/Dropbox/IASRI/sorghum/sorghum_feaSum.xlsx", sheet = "count_inp2")
+
+metadata <- read_excel("C:/Users/IASRI/Dropbox/IASRI/sorghum/sorghum_feaSum.xlsx", sheet = "metadata2")
+```
+
+data summary: In the sequencing files
+
+```{r}
+sbi_count <- as.data.frame(count_data[, 2:7])
+rownames(sbi_count) <- count_data$Geneid
+dim(sbi_count)
+```
+
+```{r}
+sbi_meta <- as.data.frame(metadata[, 2])
+rownames(sbi_meta) <- metadata$sample_name
+sbi_meta
+```
+
+```{r}
+all(rownames(sbi_meta) %in% colnames(sbi_count))
+```
+
+Raw count of gene expressed:
+
+```{r}
+## if count from estimator like kallisto; use round while assigning data
+dds <- DESeqDataSetFromMatrix(countData = round(sbi_count), colData = sbi_meta, design = ~ condition)
+dds
+```
+
+Count of gene which had more than >=10 in dataset, those (25148) are used in DE analysis:
+
+```{r}
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+dds
+```
+
+```{r}
+dds <- DESeq(dds)
+ntd <- normTransform(dds)
+vsd <- vst(dds, blind=FALSE)
+
+```
+
+Heatmap of Top 20 gene expressed-
+
+```{r}
+library("pheatmap")
+select <- order(rowMeans(counts(dds,normalized=TRUE)),
+                decreasing=TRUE)[1:20]
+df <- as.data.frame(colData(dds))
+rownames(df) <- metadata$sample_name
+pheatmap(assay(ntd)[select,], cluster_rows=TRUE, show_rownames=FALSE,
+         cluster_cols=TRUE, annotation_col=df[1])
+```
+
+Sample quality heatmap-
+
+```{r}
+sampleDists <- dist(t(assay(vsd)))
+library("RColorBrewer")
+sampleDistMatrix <- as.matrix(sampleDists)
+rownames(sampleDistMatrix) <- paste(colnames(vsd), vsd$condition, sep="-")
+colnames(sampleDistMatrix) <- NULL
+colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+pheatmap(sampleDistMatrix,
+         clustering_distance_rows=sampleDists,
+         clustering_distance_cols=sampleDists,
+         col=colors)
+```
+
+Sample PCA plot for quality: The EP line is separated from the other two line at PC1 which has explained 96% variation. PC2 is differentiating WEP from YEP samples.
+
+```{r}
+library(ggplot2)
+pcaData <- plotPCA(vsd, intgroup=c("condition"), returnData=TRUE)
+pcaData
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+ggplot(pcaData, aes(PC1, PC2, color=name, shape=condition)) + geom_point(size=3) +
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
+  coord_fixed()
+```
+
+Summary of diffrential expression in YEP vs EP-
+
+```{r}
+YEP <- results(dds, contrast=c("condition","YEP","EP"))
+yep_Ordered <- YEP[order(YEP$pvalue),]
+summary(YEP)
+```
+Summary of diffrential expression in WEP vs EP-
+```{r}
+WEP <- results(dds, contrast=c("condition","WEP","EP"))
+wep_Ordered <- WEP[order(WEP$pvalue),]
+summary(WEP)
+```
+
+No of DEG with \<0.05 FDR in YEP line was `sum(YEP$padj < 0.05, na.rm=TRUE)` and in WEP was `sum(WEP$padj < 0.05, na.rm=TRUE)`.
+
+<!--
+```{r}
+sum(YEP$padj < 0.05, na.rm=TRUE)
+```
+-->
+
+**Histogram of FDR of YEP line**
+
+```{r}
+hist(YEP$padj[YEP$baseMean > 1], breaks = 0:20/20, col = "grey50", border = "white")
+abline(v = 0.05, col = "red")
+##
+##hist(hd$padj, breaks=100, col="cornflowerblue", border="black", main="")
+##    
+## https://bioconductor.org/packages/release/workflows/vignettes/rnaseqGene/inst/doc/rnaseqGene.html
+```
+
+<!---
+No of DEG with \<0.05 pvalue-
+
+```{r}
+##sum(hd$pvalue < 0.05, na.rm=TRUE)
+```
+
+**Histogram of pvalue**
+
+```{r include=FALSE}
+##ggplot(as.data.frame(hd), aes(pvalue)) + geom_histogram() +geom_vline(xintercept=0.05, col="red")
+```
+
+```{r}
+##hist(hd$pvalue[hd$baseMean > 1], breaks = 0:20/20, col = "grey50", border = "white")
+##abline(v = 0.05, col = "red")
+```
+-->
+
+**Histogram of FDR of WEP line**
+```{r}
+hist(WEP$padj[WEP$baseMean > 1], breaks = 0:20/20, col = "grey50", border = "white")
+abline(v = 0.05, col = "red")
+```
+
+**MA plot of YEP**
+
+```{r}
+plotMA(YEP, ylim=c(-2,2))
+```
+**MA plot of WEP**
+
+```{r}
+plotMA(WEP, ylim=c(-2,2))
+```
+<!--
+Result summary of motile DEG given in excel with pvalue \<0.05
+
+```{r}
+##hd_Sig <- subset(hd, pvalue < 0.05)
+##write.csv(as.data.frame(hd_Sig), file="hd_Sig0.05pvale.csv")
+##write.csv(as.data.frame(hd), file="hd_all.csv")
+```
+-->
+
+**volcano plot of YEP based on FDR \<0.05**
+
+```{r}
+yep_v <- as.data.frame(YEP)
+ggplot(yep_v) +
+  geom_point(aes(x = log2FoldChange, y = -log10(padj),
+                 color = padj<0.05)) +
+  xlab("log2 fold change") +
+  ylab("-log10 padj") +
+  theme(legend.position = "none",
+        plot.title = element_text(size = rel(1.5), hjust = 0.5),
+        axis.title = element_text(size = rel(1.25))) +  
+  geom_vline(xintercept=c(-1, 1), col="red") +
+  geom_hline(yintercept=-log10(0.05), col="red") + theme_classic() + coord_cartesian(ylim = c(0,100))# we can add geom_vline(xintercept=c(-0.6, 0.6), col="red")+ geom_hline(yintercept=-log10(0.05), col="red")
+```
+
+**volcano plot of YEP based on FDR \<0.05**
+
+```{r}
+wep_v <- as.data.frame(WEP)
+ggplot(wep_v) +
+  geom_point(aes(x = log2FoldChange, y = -log10(padj),
+                 color = padj<0.05)) +
+  xlab("log2 fold change") +
+  ylab("-log10 padj") +
+  theme(legend.position = "none",
+        plot.title = element_text(size = rel(1.5), hjust = 0.5),
+        axis.title = element_text(size = rel(1.25))) +  
+  geom_vline(xintercept=c(-1, 1), col="red") +
+  geom_hline(yintercept=-log10(0.05), col="red") + theme_classic() + coord_cartesian(ylim = c(0,100)) # we can add geom_vline(xintercept=c(-0.6, 0.6), col="red")+ geom_hline(yintercept=-log10(0.05), col="red")
+```
+
+
+## Gene Ontology enrichment analysis
+
+```{r}
+library(clusterProfiler)
+blast2go_mapping_byGO <- read_excel("C:/Users/IASRI/Dropbox/IASRI/sorghum/sbi_ena_go_ann.xlsx", sheet = "go_inp")
+
+go2name_cpa <- read_excel("C:/Users/IASRI/Dropbox/IASRI/sorghum/sbi_ena_go_ann.xlsx", sheet = "go_name")
+```
+
+Bubble plot of top 10 GO term enriched in YEP.
+```{r}
+library(readr)
+library(dplyr)
+yep <- read_excel("C:/Users/IASRI/Dropbox/IASRI/sorghum/sorghum_yep_res.xlsx")
+yep_enr_inp <- yep$gene_id
+yep_enr <- enricher(yep_enr_inp, pvalueCutoff = 1, qvalueCutoff = 0.9,TERM2GENE = blast2go_mapping_byGO)
+enrichplot::dotplot(yep_enr)
+write.csv(left_join(as.data.frame(yep_enr), go2name_cpa, by = "ID"), file = "yep_enr.csv")
+```
+Bubble plot of top 10 GO term enriched in WEP.
+```{r}
+library(readr)
+library(dplyr)
+yep <- read_excel("C:/Users/IASRI/Dropbox/IASRI/sorghum/sorghum_wep_res.xlsx")
+yep_enr_inp <- yep$gene_id
+yep_enr <- enricher(yep_enr_inp, pvalueCutoff = 1, qvalueCutoff = 0.9,TERM2GENE = blast2go_mapping_byGO)
+enrichplot::dotplot(yep_enr)
+write.csv(left_join(as.data.frame(yep_enr), go2name_cpa, by = "ID"), file = "wep_enr.csv")
+```
+
+### Summary of result
+
+1.  The quality of samples was good at PCA and hierachical clustering level. 
+    **Note:** We have considered EP as reference level during DEG analysis. The significant threshold considered was FDR < 0.05 and log2FC |1|.
+
+2.  The number of significant DEG in YEP vs EP is 8735 of which 4892 were downregulated and 3843 were upregulated.
+
+3.  The number of significant DEG in WEP vs EP is 7688 of which 4152 were downregulated and 3536 were upregulated.
+
+4.  Please give a list of genes which might be key regulator in the DEG list after that we will make another heat map to highlight those genes.
+
+5.  Please select GO term which are related to your study, we will make plot from there or I can provide a bubble plot of top 10 gene ontology term enriched.
+
+6. The WEP vs YEP comparison might be of your interest too. In that, 37 DEG was identified of which 11 were downregulated and 37 were upregulated.

@@ -1,0 +1,225 @@
+---
+title: "car_analysis"
+author: "Sanjay Singh, PhD"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## Study on defensive response of Chickpea genotypes against gram pod borer
+
+Two diffrential responsive genotype against gram pod borer.
+Two time points-- 0 and 24 (or, say control and treatment)
+
+```{r cars, message=FALSE, warning=FALSE}
+library(readxl)
+library(DESeq2)
+```
+
+```{r}
+count_data <- read_excel("C:/Users/IASRI/Dropbox/IASRI/car/count_data.xlsx", sheet = "final_inp", col_types = c("text", "skip", "skip", "skip", "skip", "skip", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric"))
+
+metadata <- read_excel("C:/Users/IASRI/Dropbox/IASRI/car/count_data.xlsx", sheet = "metadata")
+```
+
+
+data summary:
+
+```{r}
+car_count <- as.data.frame(count_data[, 2:13])
+rownames(car_count) <- count_data$Geneid
+head(car_count)
+```
+
+```{r}
+car_meta <- as.data.frame(metadata[, 2:4])
+rownames(car_meta) <- metadata$sample_id
+car_meta
+```
+
+```{r}
+all(rownames(car_meta) %in% colnames(car_count))
+```
+Raw count of gene expressed:
+
+```{r}
+dds <- DESeqDataSetFromMatrix(countData = car_count,
+                              colData = car_meta,
+                              design = ~ condition)
+dds
+```
+Count of gene which are more than >=10 in dataset, that are used in DE analysis:
+
+```{r}
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+dds
+```
+```{r}
+dds <- DESeq(dds)
+ntd <- normTransform(dds)
+vsd <- vst(dds, blind=FALSE)
+
+```
+
+Heatmap of Top 20 gene expressed- 
+
+```{r}
+library("pheatmap")
+select <- order(rowMeans(counts(dds,normalized=TRUE)),
+                decreasing=TRUE)[1:20]
+df <- as.data.frame(colData(dds)[,c("condition", "genotype")])
+pheatmap(assay(ntd)[select,], cluster_rows=FALSE, show_rownames=FALSE,
+         cluster_cols=FALSE, annotation_col=df)
+```
+
+Sample quality heatmap-
+
+```{r}
+sampleDists <- dist(t(assay(vsd)))
+library("RColorBrewer")
+sampleDistMatrix <- as.matrix(sampleDists)
+rownames(sampleDistMatrix) <- paste(vsd$condition, vsd$hpi, sep="-")
+colnames(sampleDistMatrix) <- NULL
+colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+pheatmap(sampleDistMatrix,
+         clustering_distance_rows=sampleDists,
+         clustering_distance_cols=sampleDists,
+         col=colors)
+```
+
+Sample PCA plot for quality; its seems form quality check plot sampling was not proper so the diffrential expression analysis will have an impact. We will get few diffrentially expressed gene.
+
+```{r}
+library(ggplot2)
+pcaData <- plotPCA(vsd, intgroup=c("condition", "hpi"), returnData=TRUE)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+ggplot(pcaData, aes(PC1, PC2, color=condition, shape=as.factor(hpi))) +
+  geom_point(size=3) +
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
+  coord_fixed()
+```
+
+Summary of susceptible genotype diffrential expression-
+
+```{r}
+sus_result <- results(dds, contrast=c("condition","st","sc"))
+sus_result_Ordered <- sus_result[order(sus_result$pvalue),]
+summary(sus_result)
+```
+Summary of resistant genotype diffrential expression-
+
+```{r}
+res_result <- results(dds, contrast=c("condition","rt","rc"))
+res_result_Ordered <- res_result[order(res_result$pvalue),]
+summary(res_result)
+```
+No of DEG with <0.05 FDR in resistant genotype-
+
+```{r}
+sum(res_result$padj < 0.05, na.rm=TRUE)
+```
+No of DEG with <0.05 FDR in susceptible genotype-
+
+```{r}
+sum(sus_result$padj < 0.05, na.rm=TRUE)
+```
+
+MA plot of resistant
+```{r}
+plotMA(sus_result, ylim=c(-2,2))
+```
+
+MA plot of susceptible
+```{r}
+plotMA(res_result, ylim=c(-2,2))
+```
+
+Result summary of resistant DEG given in excel with FDR <0.1
+```{r}
+res_result_Sig <- subset(res_result_Ordered, padj < 0.1)
+write.csv(as.data.frame(res_result_Sig), 
+          file="res_result_Sig.csv")
+summary(res_result_Sig)
+```
+Result summary of susceptible DEG given in excel with FDR <0.1
+
+```{r}
+sus_result_Sig <- subset(sus_result_Ordered, padj < 0.1)
+write.csv(as.data.frame(sus_result_Sig), 
+          file="sus_result_Sig.csv")
+summary(sus_result_Sig)
+```
+volcano plot of resistant with FDR <0.05
+
+```{r}
+res_result_v <- as.data.frame(res_result)
+ggplot(res_result_v) +
+  geom_point(aes(x = log2FoldChange, y = -log10(padj),
+                 color = padj<0.05)) +
+  xlab("log2 fold change") +
+  ylab("-log10 padj") +
+  theme(legend.position = "none",
+        plot.title = element_text(size = rel(1.5), hjust = 0.5),
+        axis.title = element_text(size = rel(1.25)))
+```
+
+volcano plot of susceptible with FDR <0.05
+
+```{r}
+sus_result_v <- as.data.frame(sus_result)
+ggplot(sus_result_v) +
+  geom_point(aes(x = log2FoldChange, y = -log10(padj),
+                 color = padj<0.05)) +
+  xlab("log2 fold change") +
+  ylab("-log10 padj") +
+  theme(legend.position = "none",
+        plot.title = element_text(size = rel(1.5), hjust = 0.5),
+        axis.title = element_text(size = rel(1.25)))
+```
+
+volcano plot of resistant with pvalue <0.05
+
+```{r}
+res_result_v <- as.data.frame(res_result)
+ggplot(res_result_v) +
+  geom_point(aes(x = log2FoldChange, y = -log10(pvalue),
+                 color = pvalue<0.05)) +
+  xlab("log2 fold change") +
+  ylab("-log10 pvalue") +
+  theme(legend.position = "none",
+        plot.title = element_text(size = rel(1.5), hjust = 0.5),
+        axis.title = element_text(size = rel(1.25)))
+```
+
+volcano plot of susceptible with pvalue <0.05
+
+```{r}
+sus_result_v <- as.data.frame(sus_result)
+ggplot(sus_result_v) +
+  geom_point(aes(x = log2FoldChange, y = -log10(pvalue),
+                 color = pvalue<0.05)) +
+  xlab("log2 fold change") +
+  ylab("-log10 pvalue") +
+  theme(legend.position = "none",
+        plot.title = element_text(size = rel(1.5), hjust = 0.5),
+        axis.title = element_text(size = rel(1.25)))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+

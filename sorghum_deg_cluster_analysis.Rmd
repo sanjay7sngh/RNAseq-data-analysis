@@ -1,0 +1,72 @@
+---
+title: "Sorghum DEG cluster analysis"
+author: "Sanjay Singh, PhD"
+date: "`r Sys.Date()`"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,  warning = FALSE, message = FALSE, fig.align =  'center')
+```
+
+## The Analysis of Genetic Architecture of Iron and Zinc Biofortified Sorghum using Transcriptomics Panel
+
+The 9337 DEG were divided into 9 cluster based on expression pattern in YEP and WEP.
+
+```{r , message=FALSE, warning=FALSE}
+library(readxl)
+library(tidyverse)
+```
+
+```{r}
+cluster_deg <- read_excel("C:/Users/IASRI/Dropbox/IASRI/sorghum/results/cluster_deg.xlsx", 
++     sheet = "data_edit")
+```
+
+```{r}
+data <- cluster_deg %>% gather(., key = "genotype", value ="log2FC", YEP, WEP)
+```
+
+## boxplot cluster wise
+
+```{r}
+data %>% ggplot(., aes(x = genotype, y = log2FC, color = genotype)) + geom_boxplot() + facet_wrap(~Cluster_ID, scales = "free_y") + theme_classic()
+```
+
+```{r}
+data %>% ggplot(., aes(x = genotype, y = log2FC)) + geom_boxplot(color = "blue", fill = "skyblue") +
+  theme_classic()
+```
+
+
+
+```{r}
+table(cluster_deg$Cluster_ID)
+```
+
+
+```{r}
+library(clusterProfiler)
+blast2go_mapping_byGO <- read_excel("C:/Users/IASRI/Dropbox/IASRI/sorghum/sbi_ena_go_ann.xlsx", sheet = "go_inp")
+
+go2name_cpa <- read_excel("C:/Users/IASRI/Dropbox/IASRI/sorghum/sbi_ena_go_ann.xlsx", sheet = "go_name")
+```
+
+
+
+```{r}
+enr_inp1 <- cluster_deg %>% dplyr::filter(., Cluster_ID == "C_9")
+enr_inp <- enr_inp1$gene_id
+enr <- enricher(enr_inp, pvalueCutoff = 1, qvalueCutoff = 0.9,TERM2GENE = blast2go_mapping_byGO)
+enrichplot::dotplot(enr)
+write.csv(left_join(as.data.frame(enr), go2name_cpa, by = "ID"), file = "sbi_cluster9_enr.csv")
+```
+
+```{r}
+enr %>% dplyr::filter(., GO_domain == "BP") %>%
+  ggplot(., aes(x=ratio, y=Term, color = padj_log10, size = ratio)) + 
+  geom_point() + coord_cartesian(xlim = c(0,0.6)) +
+  facet_wrap(~Trait, scales = "free_y", nrow = 3) + theme_classic()
+```

@@ -1,0 +1,227 @@
+---
+title: "Insect RNAseq"
+author: "Sanjay Singh, PhD"
+date: "`r Sys.Date()`"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,  warning = FALSE, message = FALSE, fig.align =  'center')
+```
+
+## Differential expression of Denove assembled transcripts of *C. partellus* in dispaused and non-dispaused state
+
+Three biological replicates of RNAseq data of HD (Hibernation diapause) and ND (Nondiapause) stage of *Chilo partellus* were analysed.
+
+```{r , message=FALSE, warning=FALSE}
+library(readxl)
+library(DESeq2)
+```
+
+```{r}
+count_data <- read_excel("C:/Users/IASRI/Dropbox/IASRI/chilo_partellus/insect_count.xlsx", sheet = "input")
+
+metadata <- read_excel("C:/Users/IASRI/Dropbox/IASRI/chilo_partellus/insect_count.xlsx", sheet = "metadata")
+```
+
+data summary: In the sequencing files
+
+```{r}
+insect_count <- as.data.frame(count_data[, 2:7])
+rownames(insect_count) <- count_data$target_id
+dim(insect_count)
+```
+
+```{r}
+insect_meta <- as.data.frame(metadata[, 2])
+rownames(insect_meta) <- metadata$sample
+insect_meta
+```
+
+```{r}
+all(rownames(insect_meta) %in% colnames(insect_count))
+```
+
+Raw count of gene expressed:
+
+```{r}
+## if count from estimator like kallisto; use round while assigning data
+dds <- DESeqDataSetFromMatrix(countData = round(insect_count), colData = insect_meta, design = ~ condition)
+dds
+```
+
+Count of gene which had more than >=10 in dataset, those (29535) are used in DE analysis:
+
+```{r}
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+dds
+```
+
+```{r}
+dds <- DESeq(dds)
+ntd <- normTransform(dds)
+vsd <- vst(dds, blind=FALSE)
+
+```
+
+Heatmap of Top 20 gene expressed-
+
+```{r}
+library("pheatmap")
+select <- order(rowMeans(counts(dds,normalized=TRUE)),
+                decreasing=TRUE)[1:20]
+df <- as.data.frame(colData(dds))
+rownames(df) <- metadata$sample
+pheatmap(assay(ntd)[select,], cluster_rows=TRUE, show_rownames=FALSE,
+         cluster_cols=TRUE, annotation_col=df[1])
+```
+
+Sample quality heatmap-
+
+```{r}
+sampleDists <- dist(t(assay(vsd)))
+library("RColorBrewer")
+sampleDistMatrix <- as.matrix(sampleDists)
+rownames(sampleDistMatrix) <- paste(colnames(vsd), vsd$condition, sep="-")
+colnames(sampleDistMatrix) <- NULL
+colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+pheatmap(sampleDistMatrix,
+         clustering_distance_rows=sampleDists,
+         clustering_distance_cols=sampleDists,
+         col=colors)
+```
+
+Sample PCA plot for quality: its seems form PCA plot hd1 and nd1 samples are diverging much more from their group. At PC1 sampling variance is reflected. PC2 is differentiating ND from HD samples.
+
+```{r}
+library(ggplot2)
+pcaData <- plotPCA(vsd, intgroup=c("condition"), returnData=TRUE)
+pcaData
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+ggplot(pcaData, aes(PC1, PC2, color=name, shape=condition)) + geom_point(size=3) +
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
+  coord_fixed()
+```
+
+Summary of diffrential expression-
+
+```{r}
+hd <- results(dds, contrast=c("condition","HD","ND"))
+hd_Ordered <- hd[order(hd$pvalue),]
+summary(hd)
+```
+
+No of DEG with \<0.05 FDR-
+
+```{r}
+sum(hd$padj < 0.05, na.rm=TRUE)
+```
+
+**Histogram of FDR**
+
+```{r}
+hist(hd$padj[hd$baseMean > 1], breaks = 0:20/20, col = "grey50", border = "white")
+abline(v = 0.05, col = "red")
+##
+##hist(hd$padj, breaks=100, col="cornflowerblue", border="black", main="")
+##    
+## https://bioconductor.org/packages/release/workflows/vignettes/rnaseqGene/inst/doc/rnaseqGene.html
+```
+
+No of DEG with \<0.05 pvalue-
+
+```{r}
+sum(hd$pvalue < 0.05, na.rm=TRUE)
+```
+
+**Histogram of pvalue**
+
+```{r include=FALSE}
+ggplot(as.data.frame(hd), aes(pvalue)) + geom_histogram() +geom_vline(xintercept=0.05, col="red")
+```
+
+```{r}
+hist(hd$pvalue[hd$baseMean > 1], breaks = 0:20/20, col = "grey50", border = "white")
+abline(v = 0.05, col = "red")
+```
+
+**MA plot**
+
+```{r}
+plotMA(hd, ylim=c(-2,2))
+```
+
+Result summary of motile DEG given in excel with pvalue \<0.05
+
+```{r}
+hd_Sig <- subset(hd, pvalue < 0.05)
+write.csv(as.data.frame(hd_Sig), file="hd_Sig0.05pvale.csv")
+write.csv(as.data.frame(hd), file="hd_all.csv")
+```
+
+**volcano plot based on FDR \<0.05**
+
+```{r}
+hd_v <- as.data.frame(hd)
+ggplot(hd_v) +
+  geom_point(aes(x = log2FoldChange, y = -log10(padj),
+                 color = padj<0.05)) +
+  xlab("log2 fold change") +
+  ylab("-log10 padj") +
+  theme(legend.position = "none",
+        plot.title = element_text(size = rel(1.5), hjust = 0.5),
+        axis.title = element_text(size = rel(1.25))) +  
+  geom_vline(xintercept=c(-1, 1), col="red") +
+  geom_hline(yintercept=-log10(0.05), col="red")# we can add geom_vline(xintercept=c(-0.6, 0.6), col="red")+ geom_hline(yintercept=-log10(0.05), col="red")
+```
+
+**volcano plot based on pvale \<0.05**
+
+```{r}
+hd_v <- as.data.frame(hd)
+ggplot(hd_v) +
+  geom_point(aes(x = log2FoldChange, y = -log10(pvalue),
+                 color = pvalue<0.05)) +
+  xlab("log2 fold change") +
+  ylab("-log10 pvalue") +
+  theme(legend.position = "none",
+        plot.title = element_text(size = rel(1.5), hjust = 0.5),
+        axis.title = element_text(size = rel(1.25))) +
+  geom_vline(xintercept=c(-1, 1), col="red") +
+  geom_hline(yintercept=-log10(0.05), col="red")
+```
+
+## Gene Ontology enrichment analysis
+
+```{r}
+library(clusterProfiler)
+blast2go_mapping_byGO <- read_excel("C:/Users/IASRI/Dropbox/IASRI/chilo_partellus/blast2go_mapping_byGO.xlsx", sheet = "deg_go")
+
+go2name_cpa <- read_excel("C:/Users/IASRI/Dropbox/IASRI/chilo_partellus/blast2go_mapping_byGO.xlsx", sheet = "go2name")
+```
+
+Top 10 GO term enriched in hd.
+```{r}
+library(readr)
+library(dplyr)
+insect_hd_Sig <- read_csv("insect_hd_Sig.csv")
+insect_enr_inp <- insect_hd_Sig$GeneID
+insect_enr <- enricher(insect_enr_inp, pvalueCutoff = 1, qvalueCutoff = 0.9,TERM2GENE = blast2go_mapping_byGO)
+enrichplot::dotplot(insect_enr)
+write.csv(left_join(as.data.frame(insect_enr), go2name_cpa, by = "ID"), file = "insect_enr.csv")
+```
+
+### Summary of result
+
+1.  The samples had variation in both samples and this variation is reflected at PC1 and PC2 had differentiated ND from HD.\
+    **Note:** We have considered ND as reference level during DEG analysis.
+
+2.  The number of DEG at FDR \< 0.05 is 89 and at pvalue \< 0.05 is 1204.We are giving both the results separately.
+
+3.  Based on fold change value \|2\| i.e. log2fc of \|1\|; 1204 are differentially expressed. 544 down regulated and 660 up regulated. Please give a list of genes which might be key to regulator for diapause in the DEG list after that we will make another heat map to highlight those genes.
+
+4.  Please select GO term which are related to your study, we will make plot from there or I can provide a bubble plot of top 10 gene ontology term enriched.

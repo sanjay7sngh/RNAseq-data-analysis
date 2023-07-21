@@ -1,0 +1,184 @@
+---
+title: "Horse_rnaSeq"
+author: "Sanjay Singh, PhD"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,  warning = FALSE, message = FALSE, fig.align =  'center')
+```
+
+## Aim of the study: To identify the cellular and molecular differences in the spermatozoa of the stallions that exhibit low and high motility at semen evaluation.
+Progressive sperm motility is a major criterion for the selection of semen to be used for breeding and cryopreservation, as it is closely associated with fertility. Asthenozoospermia, defined as a semen sample with a proportion of progressively motile spermatozoa below the standard values, is a major cause of stallion infertility, and several genes and molecular markers have been linked to this condition. Despite its importance, we still do not have a comprehensive model of the myriad of mechanisms and complete understanding of the molecular mechanisms that lead to poor sperm motility. Spermatozoa contain a repertoire of RNAs considered to be potential functional fertility biomarkers. It provides the gene expression to validate the function of sperm in spermatogenesis, fertilization, and embryo development, as the parameters of male fertility. Detection of male fertility needs more sensitive and sophisticated technological approaches to answer this challenge, one of which is through transcriptomic analysis. omics technology, especially transcriptomic analysis, extensively screen the molecular dynamics of fertility markers at both the cellular and molecular levels, with high sensitivity. Using this technology in livestock growth has become the principal method, which can be widely applied to predict male fertility potential in the livestock industry through the analysis of the sperm transcriptome. Therefore, in the current study, we aimed at comparing the spermatozoal RNA and the gene expression profiling of high and low sperm motility fractions isolated from the semen samples of asthenozoospermic and normozoospermic stallions by a high-throughput approach of transcriptomic analysis.
+
+
+The paired end sequencing files of six samples belong to two group horse classified on the basis of sperm motility were quality checked with FastQC toolkit. The reads were of 150 bp in length and of high quality (Q value > 30). These were mapped to horse reference genome from ensembl (http://asia.ensembl.org/Equus_caballus/Info/Index) using HISAT2. The gene level raw read count were generated using featureCount package. The raw reads were ised as input for differential expression analysis with DESeq2 R package. In that low motile group were taken as control (reference) and high motile group as treatment. 
+
+
+```{r , message=FALSE, warning=FALSE}
+library(readxl)
+library(DESeq2)
+```
+
+```{r}
+count_data <- read_excel("C:/Users/IASRI/Dropbox/IASRI/horse/horse_count.xlsx", sheet = "input")
+
+metadata <- read_excel("C:/Users/IASRI/Dropbox/IASRI/horse/horse_count.xlsx", sheet = "metadata")
+```
+
+
+data summary: In the sequencing files
+
+```{r}
+horse_count <- as.data.frame(count_data[, 2:7])
+rownames(horse_count) <- count_data$Geneid
+dim(horse_count)
+```
+
+```{r}
+horse_meta <- as.data.frame(metadata[, 2])
+rownames(horse_meta) <- metadata$sample
+horse_meta
+```
+
+```{r}
+all(rownames(horse_meta) %in% colnames(horse_count))
+```
+Raw count of gene expressed:
+
+```{r}
+dds <- DESeqDataSetFromMatrix(countData = horse_count,
+                              colData = horse_meta,
+                              design = ~ group)
+dds
+```
+Count of gene which are more than >=10 in dataset, that are used in DE analysis:
+
+```{r}
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+dds
+```
+```{r}
+dds <- DESeq(dds)
+ntd <- normTransform(dds)
+vsd <- vst(dds, blind=FALSE)
+
+```
+
+Heatmap of Top 20 gene expressed- 
+
+```{r}
+library("pheatmap")
+select <- order(rowMeans(counts(dds,normalized=TRUE)),
+                decreasing=TRUE)[1:20]
+df <- as.data.frame(colData(dds)[, "group"])
+rownames(df) <- metadata$sample
+pheatmap(assay(ntd)[select,], cluster_rows=TRUE, show_rownames=FALSE,
+         cluster_cols=TRUE, annotation_col=df)
+```
+
+Sample quality heatmap-
+
+```{r}
+sampleDists <- dist(t(assay(vsd)))
+library("RColorBrewer")
+sampleDistMatrix <- as.matrix(sampleDists)
+rownames(sampleDistMatrix) <- paste(colnames(vsd), vsd$group, sep="-")
+colnames(sampleDistMatrix) <- NULL
+colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+pheatmap(sampleDistMatrix,
+         clustering_distance_rows=sampleDists,
+         clustering_distance_cols=sampleDists,
+         col=colors)
+```
+
+Sample PCA plot for quality: its seems form quality check plots S_139 (high motile) and Toofan a low motile have distinct gene expression unlike their respective group.
+
+```{r}
+library(ggplot2)
+pcaData <- plotPCA(vsd, intgroup=c("group"), returnData=TRUE)
+pcaData
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+ggplot(pcaData, aes(PC1, PC2, color=name, shape=group)) + geom_point(size=3) +
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
+  coord_fixed()
+```
+
+Summary of diffrential expression-
+
+```{r}
+motile_result <- results(dds, contrast=c("group","High_Motile","Low_Motile"))
+motile_result_Ordered <- motile_result[order(motile_result$pvalue),]
+summary(motile_result)
+```
+
+No of DEG with <0.05 FDR-
+
+```{r}
+sum(motile_result$padj < 0.05, na.rm=TRUE)
+```
+
+No of DEG with <0.05 pvalue-
+
+```{r}
+sum(motile_result$pvalue < 0.05, na.rm=TRUE)
+```
+
+MA plot
+```{r}
+plotMA(motile_result, ylim=c(-2,2))
+```
+
+Result summary of motile DEG given in excel with pvalue <0.05
+```{r}
+motile_result_Sig <- subset(motile_result, pvalue < 0.05)
+write.csv(as.data.frame(motile_result_Sig), file="motile_result_Sig0.05pvale.csv")
+write.csv(as.data.frame(motile_result), file="motile_result_all.csv")
+```
+
+volcano plot based on FDR <0.05
+
+```{r}
+motile_result_v <- as.data.frame(motile_result)
+ggplot(motile_result_v) +
+  geom_point(aes(x = log2FoldChange, y = -log10(padj),
+                 color = padj<0.05)) +
+  xlab("log2 fold change") +
+  ylab("-log10 padj") +
+  theme(legend.position = "none",
+        plot.title = element_text(size = rel(1.5), hjust = 0.5),
+        axis.title = element_text(size = rel(1.25)))  # we can add geom_vline(xintercept=c(-0.6, 0.6), col="red")+ geom_hline(yintercept=-log10(0.05), col="red")
+```
+
+volcano plot based on pvale <0.05
+
+
+```{r}
+motile_result_v <- as.data.frame(motile_result)
+ggplot(motile_result_v) +
+  geom_point(aes(x = log2FoldChange, y = -log10(pvalue),
+                 color = pvalue<0.05)) +
+  xlab("log2 fold change") +
+  ylab("-log10 pvalue") +
+  theme(legend.position = "none",
+        plot.title = element_text(size = rel(1.5), hjust = 0.5),
+        axis.title = element_text(size = rel(1.25)))
+```
+
+
+
+#Summary of result
+
+1. Due to much variation between high motile and low motile horse group, we are not able to find any significant differentially expressed gene between high motile and low motile based on BH-adjusted pvalue of 0.05 significant level. *Note:* We have considered low motile as reference level during DEG analysis.
+
+2. Then, we have made the threshold lenient of analysis and used pvalue < 0.05 as threshold for significance and found 2354 significant gene.
+
+3. Based on fold change value |2| i.e. log2fc of |1|; 941 are differentially expressed. 638 downregulated and 303 upregulated. Please give a list of genes which seems more related to motility from DEG list afterthat we will make another heatmap to highlight those genes.
+
+4. Please select GO term which are related to your study, we will make plot from there or I can provide a bubble plot of top 10 gene ontology term enriched.
+
+
